@@ -18,11 +18,17 @@ import (
 //
 
 type Video struct {
+	Season      int           `json:"season"`
+	Episode     int           `json:"epidsode"`
 	Id          string        `json:"id"`
 	Title       string        `json:"title"`
 	Description string        `json:"description"`
 	Url         string        `json:"url"`
 	Thumbnail   ThumbnailInfo `json:"thumbnail"`
+}
+
+type Results struct {
+	Videos []Video `json:"videos"`
 }
 
 const (
@@ -37,8 +43,19 @@ func main() {
 	}
 
 	playlistIds := map[int]string{
-		1: "ELPPAps9oEkaQ",
+		1:  "ELPPAps9oEkaQ",
+		2:  "EL-tj6jbdYkbM",
+		3:  "ELPrKKsYysHyY",
+		4:  "ELitzlFL46ACY",
+		5:  "EL-i24C31QclY",
+		6:  "ELVgKmZXK5fT4",
+		7:  "ELm0sr4YhRjFI",
+		8:  "ELCHHzvi8gZbU",
+		9:  "EL-qDGiZtJHYc",
+		10: "ELiabcfl0TJ-4UbSLCPc_p0w",
 	}
+
+	var results Results
 
 	for season, playlistId := range playlistIds {
 		tmpFileName := fmt.Sprintf("/tmp/playlist_%s.json", playlistId)
@@ -61,16 +78,25 @@ func main() {
 			slog.Warn("Unable to unmarshal playlistItemResponse", "playListId", playlistId, "error", err)
 		}
 
-		videos := playlistItemsToVideos(playlistItems)
+		videos := playlistItemsToVideos(playlistItems, season)
 
-		fmt.Printf("%+v\n", videos)
+		for _, video := range videos {
+			results.Videos = append(results.Videos, video)
+		}
 
 	}
+	output, err := json.Marshal(results)
+	if err != nil {
+		slog.Warn("Unable to marshal results int output")
+	}
+
+	if err := os.WriteFile("/tmp/mickey_episodes.json", output, 0644); err != nil {
+		slog.Warn("Unable to write output file")
+	}
+	fmt.Println(string(output))
 }
 
 func getPlaylistItems(id string, apiKey string) []byte {
-	fmt.Println(id)
-	fmt.Println(apiKey)
 	url := fmt.Sprintf(playlistItemsApiUrl, id, apiKey)
 	fmt.Println(url)
 
@@ -93,15 +119,15 @@ func getPlaylistItems(id string, apiKey string) []byte {
 }
 
 type Snippet struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Thumbnails  map[string]ThumbnailInfo
+	Title       string                   `json:"title"`
+	Description string                   `json:"description"`
+	Thumbnails  map[string]ThumbnailInfo `json:"thumbnails"`
 }
 
 type ThumbnailInfo struct {
-	url    string
-	width  int
-	height int
+	Url    string `json:"url"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
 }
 
 // To get playlistItems
@@ -134,14 +160,17 @@ func processPlaylistItems(data []byte) ([]PlaylistItem, error) {
 	return playlistItemResponse.Items, nil
 }
 
-func playlistItemsToVideos(items []PlaylistItem) []Video {
+func playlistItemsToVideos(items []PlaylistItem, season int) []Video {
 	var videos []Video
-	for _, item := range items {
+	for index, item := range items {
 		video := Video{}
+		video.Season = season
+		video.Episode = index + 1
 		video.Title = item.Snippet.Title
 		video.Thumbnail = item.Snippet.Thumbnails["default"]
 		video.Description = item.Snippet.Description
 		video.Id = item.ContentDetails.VideoId
+		video.Url = createUrlFromId(video.Id)
 		videos = append(videos, video)
 	}
 
@@ -154,4 +183,8 @@ func fileExists(path string) bool {
 		return false
 	}
 	return true
+}
+
+func createUrlFromId(id string) string {
+	return fmt.Sprintf("https://www.youtube.com/watch?v=%s", id)
 }

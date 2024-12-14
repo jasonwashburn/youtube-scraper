@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -39,6 +40,12 @@ func main() {
 		}
 
 		fmt.Println(string(videoInfo))
+		snippet, err := processVideoInfo(videoInfo)
+		if err != nil {
+			slog.Warn("Unable to unmarshal video info", "id", id, "error", err)
+		}
+
+		fmt.Printf("%+v\n", snippet)
 	}
 }
 
@@ -63,7 +70,35 @@ func getVideoInfo(id string, apiKey string) []byte {
 	return body
 }
 
-func processVideoInfo(s string) {
+type VideosResponse struct {
+	Items []VideoInfo `json:"items"`
+}
+
+type VideoInfo struct {
+	Id      string  `json:"id"`
+	Snippet Snippet `json:"snippet"`
+}
+
+type Snippet struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Thumbnails  map[string]ThumbnailInfo
+}
+
+type ThumbnailInfo struct {
+	url    string
+	width  int
+	height int
+}
+
+func processVideoInfo(data []byte) (Snippet, error) {
+	var videos VideosResponse
+
+	if err := json.Unmarshal(data, &videos); err != nil {
+		return Snippet{}, err
+	}
+
+	return videos.Items[0].Snippet, nil
 }
 
 func fileExists(path string) bool {

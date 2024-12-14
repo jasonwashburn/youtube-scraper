@@ -10,13 +10,25 @@ import (
 	"os"
 )
 
+// To get video info
 // curl \
 //   'https://youtube.googleapis.com/youtube/v3/videos?part=snippet&id=EjB1kz2tn5s&key=[YOUR_API_KEY]' \
 //   --header 'Accept: application/json' \
 //   --compressed
 //
 
-const apiUrl = "https://youtube.googleapis.com/youtube/v3/videos?part=snippet&id=%s&key=%s"
+type Video struct {
+	Id          string        `json:"id"`
+	Title       string        `json:"title"`
+	Description string        `json:"description"`
+	Url         string        `json:"url"`
+	Thumbnail   ThumbnailInfo `json:"thumbnail"`
+}
+
+const (
+	videosApiUrl        = "https://youtube.googleapis.com/youtube/v3/videos?part=snippet&id=%s&key=%s"
+	playlistItemsApiUrl = "https://youtube.googleapis.com/youtube/v3/playlistItems?part=id,snippet,contentDetails&maxResults=15&playlistId=%s&key=%s"
+)
 
 func main() {
 	apiKey := os.Getenv("YOUTUBE_API_KEY")
@@ -24,37 +36,47 @@ func main() {
 		log.Fatal("YOUTUBE_API_KEY environment variable is not set")
 	}
 
-	videoIds := []string{"EjB1kz2tn5s"}
-	for _, id := range videoIds {
-		tmpFileName := fmt.Sprintf("/tmp/%s.json", id)
+	playlistIds := map[int]string{
+		1: "ELPPAps9oEkaQ",
+	}
+
+	for season, playlistId := range playlistIds {
+		tmpFileName := fmt.Sprintf("/tmp/playlist_%s.json", playlistId)
 		if !fileExists(tmpFileName) {
-			videoInfo := getVideoInfo("EjB1kz2tn5s", apiKey)
-			slog.Info("Fetching info for video: ", id)
-			if err := os.WriteFile(tmpFileName, videoInfo, 0644); err != nil {
+			slog.Info("Fetching playlistItems for season", "season", season, "playlistId", playlistId)
+			playlistItemResponse := getPlaylistItems(playlistId, apiKey)
+
+			if err := os.WriteFile(tmpFileName, playlistItemResponse, 0644); err != nil {
 				slog.Warn("Unable to write file: ", tmpFileName)
 			}
 		}
-		videoInfo, err := os.ReadFile(tmpFileName)
+
+		playlistItemResponse, err := os.ReadFile(tmpFileName)
 		if err != nil {
 			slog.Warn("Unable to read file: ", tmpFileName)
 		}
 
-		fmt.Println(string(videoInfo))
-		snippet, err := processVideoInfo(videoInfo)
+		playlistItems, err := processPlaylistItems(playlistItemResponse)
 		if err != nil {
-			slog.Warn("Unable to unmarshal video info", "id", id, "error", err)
+			slog.Warn("Unable to unmarshal playlistItemResponse", "playListId", playlistId, "error", err)
 		}
 
-		fmt.Printf("%+v\n", snippet)
+		videos := playlistItemsToVideos(playlistItems)
+
+		fmt.Printf("%+v\n", videos)
+
 	}
 }
 
-func getVideoInfo(id string, apiKey string) []byte {
-	url := fmt.Sprintf(apiUrl, id, apiKey)
+func getPlaylistItems(id string, apiKey string) []byte {
+	fmt.Println(id)
+	fmt.Println(apiKey)
+	url := fmt.Sprintf(playlistItemsApiUrl, id, apiKey)
+	fmt.Println(url)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		log.Fatal("Failed to get video info: ", err)
+		log.Fatal("Failed to get playlistItems: ", err)
 	}
 
 	req.Header.Set("Accept", "application/json")
@@ -70,15 +92,6 @@ func getVideoInfo(id string, apiKey string) []byte {
 	return body
 }
 
-type VideosResponse struct {
-	Items []VideoInfo `json:"items"`
-}
-
-type VideoInfo struct {
-	Id      string  `json:"id"`
-	Snippet Snippet `json:"snippet"`
-}
-
 type Snippet struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
@@ -91,14 +104,48 @@ type ThumbnailInfo struct {
 	height int
 }
 
-func processVideoInfo(data []byte) (Snippet, error) {
-	var videos VideosResponse
+// To get playlistItems
+// curl \
+//   'https://youtube.googleapis.com/youtube/v3/playlistItems?part=id%2Csnippet%2CcontentDetails&maxResults=15&playlistId=ELPPAps9oEkaQ&key=[YOUR_API_KEY]' \
+//   --header 'Authorization: Bearer [YOUR_ACCESS_TOKEN]' \
+//   --header 'Accept: application/json' \
+//   --compressed
 
-	if err := json.Unmarshal(data, &videos); err != nil {
-		return Snippet{}, err
+type PlaylistItemResponse struct {
+	Items []PlaylistItem `json:"items"`
+}
+
+type PlaylistItem struct {
+	Snippet        Snippet        `json:"snippet"`
+	ContentDetails ContentDetails `json:"contentDetails"`
+}
+
+type ContentDetails struct {
+	VideoId string `json:"videoId"`
+}
+
+func processPlaylistItems(data []byte) ([]PlaylistItem, error) {
+	var playlistItemResponse PlaylistItemResponse
+
+	if err := json.Unmarshal(data, &playlistItemResponse); err != nil {
+		return playlistItemResponse.Items, err
 	}
 
-	return videos.Items[0].Snippet, nil
+	return playlistItemResponse.Items, nil
+}
+
+func playlistItemsToVideos(items []PlaylistItem) []Video {
+	var videos []Video
+	for _, item := range items {
+		video := Video{}
+		video.Title = item.Snippet.Title
+		video.Thumbnail = item.Snippet.Thumbnails["default"]
+		video.Description = item.Snippet.Description
+		video.Id = item.ContentDetails.VideoId
+		videos = append(videos, video)
+	}
+
+	return videos
 }
 
 func fileExists(path string) bool {
